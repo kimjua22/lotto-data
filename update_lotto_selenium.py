@@ -12,7 +12,7 @@ import json, sys, time
 from datetime import datetime
 
 JSON_FILE = 'lotto_json.json'
-JSON_URL = 'https://www.dhlottery.co.kr/lt645/selectPastLt645Info.do?srchLtEpsd=all'
+JSON_URL = 'https://www.dhlottery.co.kr/lt645/result'
 
 def setup_driver():
     print("🌐 Chrome WebDriver 초기화 중...")

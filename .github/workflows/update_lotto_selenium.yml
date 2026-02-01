@@ -39,15 +39,14 @@ jobs:
           echo "✅ JSON 파일 생성 확인"
           echo "파일 크기: $(wc -c < lotto_json.json) bytes"
           
-          # 최신 회차 확인
-          python3 << EOF
-import json
-with open('lotto_json.json', 'r', encoding='utf-8') as f:
-    data = json.load(f)
-    count = len(data['data']['list'])
-    latest = max(item['ltEpsd'] for item in data['data']['list'])
-    print(f"총 {count}개 회차, 최신: {latest}회")
-EOF
+          python3 << 'EOF'
+        import json
+        with open('lotto_json.json', 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            count = len(data['data']['list'])
+            latest = max(item['ltEpsd'] for item in data['data']['list'])
+            print(f"총 {count}개 회차, 최신: {latest}회")
+        EOF
         else
           echo "❌ JSON 파일이 생성되지 않았습니다"
           exit 1
@@ -66,4 +65,3 @@ EOF
           git push
           echo "✅ 업데이트 완료!"
         fi
-        

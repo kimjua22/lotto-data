@@ -2,7 +2,9 @@
 # update_lotto_selenium.py
 """
 최종 완성 버전
-input value의 최신 회차부터 역순으로 필요한 만큼만 수집
+1. input value에서 최신 회차 확인
+2. 최신 회차로 명시적 이동
+3. 역순으로 필요한 회차만 수집
 """
 
 from selenium import webdriver
@@ -64,22 +66,23 @@ def load_existing_json():
         print(f"❌ JSON 로드 실패: {e}\n")
         return None, 0
 
-def get_latest_draw_from_page(driver):
-    """페이지에서 최신 회차 번호 확인 (input value 사용)"""
+def get_latest_draw_from_dropdown(driver):
+    """드롭다운에서 최신 회차 확인"""
     try:
         html = driver.page_source
         
-        # input value 확인 (가장 정확)
-        value_match = re.search(r'<input[^>]*id="opt_val"[^>]*value="(\d+)"', html)
-        if value_match:
-            return int(value_match.group(1))
-        
-        # 드롭다운 옵션에서 최신 찾기
+        # 드롭다운 옵션에서 모든 회차 찾기
         pattern = r'data-value="(\d+)">(\d+)회</button>'
         matches = re.findall(pattern, html)
+        
         if matches:
             draw_numbers = [int(m[0]) for m in matches]
             return max(draw_numbers)
+        
+        # input value 확인
+        value_match = re.search(r'<input[^>]*id="opt_val"[^>]*value="(\d+)"', html)
+        if value_match:
+            return int(value_match.group(1))
         
         return None
     except:
@@ -101,13 +104,66 @@ def get_current_displayed_draw(driver):
     except:
         return None
 
+def navigate_to_latest_draw(driver, target_latest):
+    """최신 회차로 이동"""
+    
+    print(f"🎯 최신 회차({target_latest}회)로 이동 중...")
+    
+    max_attempts = 10
+    
+    for attempt in range(max_attempts):
+        current = get_current_displayed_draw(driver)
+        
+        if not current:
+            print(f"  ⚠️  현재 회차 확인 실패")
+            time.sleep(2)
+            continue
+        
+        if current == target_latest:
+            print(f"  ✅ {target_latest}회 도착!\n")
+            return True
+        
+        if current < target_latest:
+            # 다음 버튼 (앞으로)
+            script = """
+            var nextBtn = document.querySelector('.swiper-button-next');
+            if (nextBtn && !nextBtn.classList.contains('swiper-button-disabled')) {
+                nextBtn.click();
+                return true;
+            }
+            // 비활성화 상태여도 시도
+            if (nextBtn) {
+                nextBtn.click();
+                return true;
+            }
+            return false;
+            """
+            
+            driver.execute_script(script)
+            time.sleep(2)
+            
+        else:
+            # 이전 버튼 (뒤로)
+            script = """
+            var prevBtn = document.querySelector('.swiper-button-prev');
+            if (prevBtn && !prevBtn.classList.contains('swiper-button-disabled')) {
+                prevBtn.click();
+                return true;
+            }
+            return false;
+            """
+            
+            driver.execute_script(script)
+            time.sleep(2)
+    
+    print(f"  ⚠️  {target_latest}회로 이동 실패\n")
+    return False
+
 def click_prev_button(driver):
     """이전 버튼 클릭"""
     try:
         script = """
         var prevBtn = document.querySelector('.swiper-button-prev');
-        if (!prevBtn) prevBtn = document.querySelector('[class*="prev"]');
-        
         if (prevBtn && !prevBtn.classList.contains('swiper-button-disabled')) {
             prevBtn.click();
             return true;
@@ -196,7 +252,7 @@ def extract_current_draw_data(driver):
     except:
         return None
 
-def collect_missing_draws_reverse(driver, existing_data, page_latest, json_latest):
+def collect_missing_draws_from_latest(driver, existing_data, page_latest, json_latest):
     """최신 회차부터 역순으로 필요한 회차만 수집"""
     
     print(f"🔄 역순 수집: {page_latest}회부터 {json_latest + 1}회까지\n")
@@ -204,42 +260,33 @@ def collect_missing_draws_reverse(driver, existing_data, page_latest, json_lates
     added_list = []
     existing_draws = [item['ltEpsd'] for item in existing_data['data']['list']]
     
-    # 최신 회차부터 시작
     current_target = page_latest
     
     while current_target > json_latest:
-        print(f"[{current_target}회 확인]")
-        
-        # 이미 존재?
-        if current_target in existing_draws:
-            print(f"  ℹ️  이미 존재함, 건너뛰기\n")
-            current_target -= 1
-            
-            # 이전 버튼 클릭
-            if not click_prev_button(driver):
-                print(f"  ⚠️  이전 버튼 클릭 실패\n")
-                break
-            
-            continue
-        
         # 현재 표시된 회차 확인
         displayed = get_current_displayed_draw(driver)
         
-        if displayed != current_target:
-            print(f"  ⚠️  회차 불일치: 목표 {current_target}회, 실제 {displayed}회")
+        print(f"[목표: {current_target}회 / 실제: {displayed}회]")
+        
+        if not displayed:
+            print(f"  ⚠️  회차 확인 실패\n")
+            break
+        
+        # 이미 존재?
+        if displayed in existing_draws or displayed in [e['ltEpsd'] for e in added_list]:
+            print(f"  ℹ️  {displayed}회는 이미 처리됨\n")
             
-            # 실제 표시된 회차로 조정
-            if displayed and displayed > json_latest:
-                print(f"  → {displayed}회 데이터로 처리")
-                current_target = displayed
-            else:
-                print(f"  → 건너뛰기\n")
-                current_target -= 1
-                
-                if not click_prev_button(driver):
-                    break
-                
-                continue
+            if not click_prev_button(driver):
+                print(f"  ℹ️  이전 버튼 없음\n")
+                break
+            
+            current_target = displayed - 1
+            continue
+        
+        # 필요한 범위 밖?
+        if displayed <= json_latest:
+            print(f"  ℹ️  {displayed}회는 이미 JSON에 있음, 종료\n")
+            break
         
         # 데이터 추출
         new_entry = extract_current_draw_data(driver)
@@ -247,24 +294,20 @@ def collect_missing_draws_reverse(driver, existing_data, page_latest, json_lates
         if new_entry:
             actual_draw = new_entry['ltEpsd']
             
-            if actual_draw in existing_draws or actual_draw in [e['ltEpsd'] for e in added_list]:
-                print(f"  ⚠️  {actual_draw}회는 이미 처리됨\n")
-            else:
-                print(f"  ✅ {actual_draw}회 추출 성공")
-                print(f"     당첨번호: {new_entry['tm1WnNo']}, {new_entry['tm2WnNo']}, {new_entry['tm3WnNo']}, {new_entry['tm4WnNo']}, {new_entry['tm5WnNo']}, {new_entry['tm6WnNo']} + {new_entry['bnsWnNo']}")
-                print(f"     추첨일: {new_entry['ltRflYmd']}\n")
-                
-                added_list.append(new_entry)
+            print(f"  ✅ {actual_draw}회 추출 성공")
+            print(f"     당첨번호: {new_entry['tm1WnNo']}, {new_entry['tm2WnNo']}, {new_entry['tm3WnNo']}, {new_entry['tm4WnNo']}, {new_entry['tm5WnNo']}, {new_entry['tm6WnNo']} + {new_entry['bnsWnNo']}")
+            print(f"     추첨일: {new_entry['ltRflYmd']}\n")
+            
+            added_list.append(new_entry)
         else:
             print(f"  ⚠️  데이터 추출 실패\n")
         
-        current_target -= 1
+        # 이전 버튼
+        if not click_prev_button(driver):
+            print(f"  ℹ️  이전 버튼 없음, 종료\n")
+            break
         
-        # 이전 버튼 클릭
-        if current_target > json_latest:
-            if not click_prev_button(driver):
-                print(f"  ℹ️  이전 버튼 없음, 종료\n")
-                break
+        current_target = displayed - 1
     
     # 추가
     if added_list:
@@ -275,7 +318,7 @@ def collect_missing_draws_reverse(driver, existing_data, page_latest, json_lates
 
 def main():
     print("="*60)
-    print("🎯 스마트 점진적 업데이트 (역순 수집)")
+    print("🎯 스마트 점진적 업데이트 (최종 완성)")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60 + "\n")
     
@@ -291,17 +334,20 @@ def main():
         
         print(f"📡 페이지 접속: {RESULT_URL}")
         driver.get(RESULT_URL)
-        time.sleep(5)  # 충분히 대기
+        time.sleep(5)
         print(f"   페이지 로드 완료\n")
         
-        # 페이지의 최신 회차 확인
-        page_latest = get_latest_draw_from_page(driver)
+        # 드롭다운에서 최신 회차 확인
+        page_latest = get_latest_draw_from_dropdown(driver)
         
         if not page_latest:
-            print("❌ 페이지에서 최신 회차를 확인할 수 없습니다\n")
+            print("❌ 최신 회차를 확인할 수 없습니다\n")
             return 1
         
-        print(f"📍 페이지 최신: {page_latest}회")
+        initial_displayed = get_current_displayed_draw(driver)
+        
+        print(f"📍 드롭다운 최신: {page_latest}회")
+        print(f"   현재 표시: {initial_displayed}회")
         print(f"   JSON 최신: {json_latest}회")
         
         if page_latest <= json_latest:
@@ -310,8 +356,12 @@ def main():
         
         print(f"   필요한 회차: {json_latest + 1}회 ~ {page_latest}회 (총 {page_latest - json_latest}개)\n")
         
+        # 최신 회차로 이동
+        if not navigate_to_latest_draw(driver, page_latest):
+            print("⚠️  최신 회차로 이동 실패, 현재 위치에서 시작\n")
+        
         # 역순 수집
-        updated_data, added_count = collect_missing_draws_reverse(
+        updated_data, added_count = collect_missing_draws_from_latest(
             driver, existing_data, page_latest, json_latest
         )
         

@@ -42250,7 +42250,7 @@
             },
             {
                 "winType0": 0,
-                "winType1": 6,
+                "winType1": 0,
                 "winType2": 0,
                 "winType3": 0,
                 "gmSqNo": 5133,
@@ -42263,31 +42263,26 @@
                 "tm6WnNo": 42,
                 "bnsWnNo": 25,
                 "ltRflYmd": "20260124",
-                "rnk1WnNope": 6,
-                "rnk1WnAmt": 5001713625,
-                "rnk1SumWnAmt": 30010281750,
-                "rnk2WnNope": 68,
-                "rnk2WnAmt": 73554613,
-                "rnk2SumWnAmt": 5001713684,
-                "rnk3WnNope": 2932,
-                "rnk3WnAmt": 1705906,
-                "rnk3SumWnAmt": 5001716392,
-                "rnk4WnNope": 149359,
-                "rnk4WnAmt": 50000,
-                "rnk4SumWnAmt": 7467950000,
-                "rnk5WnNope": 2544535,
-                "rnk5WnAmt": 5000,
-                "rnk5SumWnAmt": 12722675000,
-                "sumWnNope": 2696900,
-                "rlvtEpsdSumNtslAmt": 60204336826,
-                "wholEpsdSumNtslAmt": 120408668000,
+                "rnk1WnNope": 0,
+                "rnk1WnAmt": 0,
+                "rnk1SumWnAmt": 0,
+                "rnk2WnNope": 0,
+                "rnk2WnAmt": 0,
+                "rnk2SumWnAmt": 0,
+                "rnk3WnNope": 0,
+                "rnk3WnAmt": 0,
+                "rnk3SumWnAmt": 0,
+                "rnk4WnNope": 0,
+                "rnk4WnAmt": 0,
+                "rnk4SumWnAmt": 0,
+                "rnk5WnNope": 0,
+                "rnk5WnAmt": 0,
+                "rnk5SumWnAmt": 0,
+                "sumWnNope": 0,
+                "rlvtEpsdSumNtslAmt": 0,
+                "wholEpsdSumNtslAmt": 0,
                 "excelRnk": "1등"
             }
-            
         ]
     }
-
 }
-
-
-

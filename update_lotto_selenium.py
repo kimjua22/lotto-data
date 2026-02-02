@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # update_lotto_selenium.py
 """
-드롭다운 실제 동작 기반 업데이트
-표시된 회차를 그대로 사용하여 안정적으로 처리
+스마트 점진적 업데이트 - 최종 안정 버전
+1. 필요한 회차까지 뒤로 이동
+2. 앞으로 진행하면서 데이터 수집
 """
 
 from selenium import webdriver
@@ -81,15 +82,37 @@ def get_current_displayed_draw(driver):
     except:
         return None
 
-def click_next_draw_button(driver):
-    """다음 회차 버튼 클릭 (오른쪽 화살표)"""
+def click_prev_button(driver):
+    """이전 버튼 클릭 (왼쪽 화살표)"""
     try:
-        # 다음 버튼 JavaScript로 클릭
         script = """
-        // 다음 버튼 찾기 (여러 가능성 시도)
+        var prevBtn = document.querySelector('.swiper-button-prev');
+        if (!prevBtn) prevBtn = document.querySelector('[class*="prev"]');
+        
+        if (prevBtn && !prevBtn.classList.contains('swiper-button-disabled')) {
+            prevBtn.click();
+            return true;
+        }
+        return false;
+        """
+        
+        result = driver.execute_script(script)
+        
+        if result:
+            time.sleep(2)
+            return True
+        
+        return False
+        
+    except Exception as e:
+        return False
+
+def click_next_button(driver):
+    """다음 버튼 클릭 (오른쪽 화살표)"""
+    try:
+        script = """
         var nextBtn = document.querySelector('.swiper-button-next');
         if (!nextBtn) nextBtn = document.querySelector('[class*="next"]');
-        if (!nextBtn) nextBtn = document.querySelector('button[aria-label*="다음"]');
         
         if (nextBtn && !nextBtn.classList.contains('swiper-button-disabled')) {
             nextBtn.click();
@@ -101,14 +124,48 @@ def click_next_draw_button(driver):
         result = driver.execute_script(script)
         
         if result:
-            time.sleep(2)  # 슬라이드 애니메이션 대기
+            time.sleep(2)
             return True
         
         return False
         
     except Exception as e:
-        print(f"  ⚠️  다음 버튼 클릭 실패: {e}")
         return False
+
+def navigate_to_draw(driver, target_draw):
+    """특정 회차로 이동"""
+    
+    print(f"🎯 {target_draw}회로 이동 중...")
+    
+    max_moves = 20
+    moves = 0
+    
+    while moves < max_moves:
+        current = get_current_displayed_draw(driver)
+        
+        if not current:
+            print(f"  ⚠️  현재 회차 확인 실패")
+            return False
+        
+        if current == target_draw:
+            print(f"  ✅ {target_draw}회 도착!\n")
+            return True
+        
+        if current > target_draw:
+            # 뒤로 가기
+            if not click_prev_button(driver):
+                print(f"  ⚠️  이전 버튼 클릭 실패")
+                return False
+        else:
+            # 앞으로 가기
+            if not click_next_button(driver):
+                print(f"  ⚠️  다음 버튼 클릭 실패")
+                return False
+        
+        moves += 1
+    
+    print(f"  ⚠️  {target_draw}회로 이동 실패 (최대 시도 초과)")
+    return False
 
 def extract_current_draw_data(driver):
     """현재 표시된 회차 데이터 추출"""
@@ -182,59 +239,47 @@ def extract_current_draw_data(driver):
         return new_entry
         
     except Exception as e:
-        print(f"  ❌ 추출 실패: {e}")
         return None
 
-def try_update_from_current_position(driver, existing_data, target_latest):
-    """현재 위치에서부터 순차적으로 업데이트"""
+def collect_missing_draws(driver, existing_data, start_draw):
+    """누락된 회차들 수집"""
     
-    print(f"🔄 현재 위치에서부터 업데이트 시작\n")
+    print(f"🔄 수집 시작: {start_draw}회부터\n")
     
     added_count = 0
     failed_count = 0
-    attempts = 0
-    max_attempts = 20  # 최대 20회 시도
+    current_draw = start_draw
     
     existing_draws = [item['ltEpsd'] for item in existing_data['data']['list']]
     
-    while failed_count < MAX_FAILED_ATTEMPTS and attempts < max_attempts:
-        attempts += 1
+    # 1. 시작 회차로 이동
+    if not navigate_to_draw(driver, start_draw):
+        print(f"⚠️  시작 회차로 이동 실패\n")
+        return existing_data, 0
+    
+    # 2. 앞으로 진행하면서 수집
+    while failed_count < MAX_FAILED_ATTEMPTS:
+        current = get_current_displayed_draw(driver)
         
-        # 현재 표시된 회차 확인
-        current_draw = get_current_displayed_draw(driver)
-        
-        if not current_draw:
-            print(f"[시도 {attempts}] 회차 번호를 확인할 수 없음\n")
+        if not current:
+            print(f"  ⚠️  회차 확인 실패")
             failed_count += 1
             
-            # 다음 버튼 클릭 시도
-            if not click_next_draw_button(driver):
-                print(f"  ⚠️  더 이상 진행 불가\n")
+            if not click_next_button(driver):
                 break
             continue
         
-        print(f"[시도 {attempts}] 현재 표시: {current_draw}회")
+        print(f"[{current}회]")
         
-        # 이미 존재하는 회차면 건너뛰기
-        if current_draw in existing_draws:
-            print(f"  ℹ️  {current_draw}회는 이미 존재함, 다음으로...\n")
+        # 이미 존재?
+        if current in existing_draws:
+            print(f"  ℹ️  이미 존재함, 건너뛰기\n")
             
-            # 다음 버튼 클릭
-            if not click_next_draw_button(driver):
-                print(f"  ⚠️  다음 버튼 클릭 실패, 종료\n")
+            if not click_next_button(driver):
+                print(f"  ℹ️  다음 버튼 없음 (최신 도달)\n")
                 break
             
-            failed_count = 0  # 존재하는 건 실패 아님
-            continue
-        
-        # 목표 회차보다 작으면 건너뛰기
-        if current_draw < target_latest:
-            print(f"  ℹ️  {current_draw}회는 이미 처리된 범위, 다음으로...\n")
-            
-            if not click_next_draw_button(driver):
-                print(f"  ⚠️  다음 버튼 클릭 실패, 종료\n")
-                break
-            
+            failed_count = 0
             continue
         
         # 데이터 추출
@@ -243,49 +288,39 @@ def try_update_from_current_position(driver, existing_data, target_latest):
         if new_entry:
             actual_draw = new_entry['ltEpsd']
             
-            # 중복 체크
             if actual_draw in existing_draws:
                 print(f"  ⚠️  {actual_draw}회는 이미 존재함\n")
+            else:
+                print(f"  ✅ {actual_draw}회 추출 성공")
+                print(f"     당첨번호: {new_entry['tm1WnNo']}, {new_entry['tm2WnNo']}, {new_entry['tm3WnNo']}, {new_entry['tm4WnNo']}, {new_entry['tm5WnNo']}, {new_entry['tm6WnNo']} + {new_entry['bnsWnNo']}")
+                print(f"     추첨일: {new_entry['ltRflYmd']}\n")
                 
-                if not click_next_draw_button(driver):
-                    break
+                existing_data['data']['list'].append(new_entry)
+                existing_data['data']['list'].sort(key=lambda x: x['ltEpsd'])
+                existing_draws.append(actual_draw)
                 
-                continue
+                added_count += 1
             
-            print(f"  ✅ {actual_draw}회 추출 성공")
-            print(f"     당첨번호: {new_entry['tm1WnNo']}, {new_entry['tm2WnNo']}, {new_entry['tm3WnNo']}, {new_entry['tm4WnNo']}, {new_entry['tm5WnNo']}, {new_entry['tm6WnNo']} + {new_entry['bnsWnNo']}")
-            print(f"     추첨일: {new_entry['ltRflYmd']}\n")
-            
-            # 추가
-            existing_data['data']['list'].append(new_entry)
-            existing_data['data']['list'].sort(key=lambda x: x['ltEpsd'])
-            existing_draws.append(actual_draw)
-            
-            added_count += 1
             failed_count = 0
             
-            # 다음 버튼 클릭
-            if not click_next_draw_button(driver):
-                print(f"  ℹ️  다음 버튼 없음 (최신 회차 도달)\n")
-                break
-            
         else:
-            print(f"  ⚠️  {current_draw}회 데이터 추출 실패\n")
+            print(f"  ⚠️  데이터 추출 실패 (아직 추첨 안 됨)\n")
             failed_count += 1
             
             if failed_count >= MAX_FAILED_ATTEMPTS:
                 print(f"  ℹ️  {MAX_FAILED_ATTEMPTS}회 연속 실패, 중단\n")
                 break
-            
-            # 다음 시도
-            if not click_next_draw_button(driver):
-                break
+        
+        # 다음으로
+        if not click_next_button(driver):
+            print(f"  ℹ️  다음 버튼 없음 (최신 도달)\n")
+            break
     
     return existing_data, added_count
 
 def main():
     print("="*60)
-    print("🎯 스마트 점진적 업데이트 (순차 진행)")
+    print("🎯 스마트 점진적 업데이트 (최종 안정 버전)")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60 + "\n")
     
@@ -307,15 +342,15 @@ def main():
         time.sleep(3)
         print(f"   페이지 로드 완료\n")
         
-        # 4. 현재 표시된 회차 확인
+        # 4. 현재 위치 확인
         initial_draw = get_current_displayed_draw(driver)
-        print(f"🎯 시작 위치: {initial_draw}회")
-        print(f"   목표: {existing_latest + 1}회부터 추가\n")
+        print(f"📍 현재 위치: {initial_draw}회")
+        print(f"   JSON 최신: {existing_latest}회")
+        print(f"   목표: {existing_latest + 1}회부터 수집\n")
         
-        # 5. 현재 위치에서부터 순차 업데이트
-        updated_data, added_count = try_update_from_current_position(
-            driver, existing_data, existing_latest + 1
-        )
+        # 5. 누락 회차 수집
+        start_draw = existing_latest + 1
+        updated_data, added_count = collect_missing_draws(driver, existing_data, start_draw)
         
         # 6. 결과 확인
         if added_count == 0:

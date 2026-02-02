@@ -42212,42 +42212,8 @@
                 "rlvtEpsdSumNtslAmt": 60506345998,
                 "wholEpsdSumNtslAmt": 121012690000,
                 "excelRnk": "1등"
-            },
-            {
-                "winType0": 0,
-                "winType1": 0,
-                "winType2": 0,
-                "winType3": 0,
-                "gmSqNo": 5133,
-                "ltEpsd": 1208,
-                "tm1WnNo": 6,
-                "tm2WnNo": 27,
-                "tm3WnNo": 30,
-                "tm4WnNo": 36,
-                "tm5WnNo": 38,
-                "tm6WnNo": 42,
-                "bnsWnNo": 25,
-                "ltRflYmd": "20260124",
-                "rnk1WnNope": 0,
-                "rnk1WnAmt": 0,
-                "rnk1SumWnAmt": 0,
-                "rnk2WnNope": 0,
-                "rnk2WnAmt": 0,
-                "rnk2SumWnAmt": 0,
-                "rnk3WnNope": 0,
-                "rnk3WnAmt": 0,
-                "rnk3SumWnAmt": 0,
-                "rnk4WnNope": 0,
-                "rnk4WnAmt": 0,
-                "rnk4SumWnAmt": 0,
-                "rnk5WnNope": 0,
-                "rnk5WnAmt": 0,
-                "rnk5SumWnAmt": 0,
-                "sumWnNope": 0,
-                "rlvtEpsdSumNtslAmt": 0,
-                "wholEpsdSumNtslAmt": 0,
-                "excelRnk": "1등"
             }
+            
         ]
     }
 }

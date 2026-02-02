@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # update_lotto_selenium.py
 """
-스마트 점진적 업데이트 - 최종 안정 버전
-1. 필요한 회차까지 뒤로 이동
-2. 앞으로 진행하면서 데이터 수집
+최종 완성 버전
+다음 버튼이 비활성화되어도 한 번 더 시도
 """
 
 from selenium import webdriver
@@ -83,7 +82,7 @@ def get_current_displayed_draw(driver):
         return None
 
 def click_prev_button(driver):
-    """이전 버튼 클릭 (왼쪽 화살표)"""
+    """이전 버튼 클릭"""
     try:
         script = """
         var prevBtn = document.querySelector('.swiper-button-prev');
@@ -104,22 +103,36 @@ def click_prev_button(driver):
         
         return False
         
-    except Exception as e:
+    except:
         return False
 
-def click_next_button(driver):
-    """다음 버튼 클릭 (오른쪽 화살표)"""
+def click_next_button(driver, force=False):
+    """다음 버튼 클릭 (force=True면 비활성화 상태에서도 시도)"""
     try:
-        script = """
-        var nextBtn = document.querySelector('.swiper-button-next');
-        if (!nextBtn) nextBtn = document.querySelector('[class*="next"]');
-        
-        if (nextBtn && !nextBtn.classList.contains('swiper-button-disabled')) {
-            nextBtn.click();
-            return true;
-        }
-        return false;
-        """
+        if force:
+            # 강제 클릭 (비활성화 상태 무시)
+            script = """
+            var nextBtn = document.querySelector('.swiper-button-next');
+            if (!nextBtn) nextBtn = document.querySelector('[class*="next"]');
+            
+            if (nextBtn) {
+                nextBtn.click();
+                return true;
+            }
+            return false;
+            """
+        else:
+            # 일반 클릭 (활성화 상태만)
+            script = """
+            var nextBtn = document.querySelector('.swiper-button-next');
+            if (!nextBtn) nextBtn = document.querySelector('[class*="next"]');
+            
+            if (nextBtn && !nextBtn.classList.contains('swiper-button-disabled')) {
+                nextBtn.click();
+                return true;
+            }
+            return false;
+            """
         
         result = driver.execute_script(script)
         
@@ -129,7 +142,7 @@ def click_next_button(driver):
         
         return False
         
-    except Exception as e:
+    except:
         return False
 
 def navigate_to_draw(driver, target_draw):
@@ -152,19 +165,17 @@ def navigate_to_draw(driver, target_draw):
             return True
         
         if current > target_draw:
-            # 뒤로 가기
             if not click_prev_button(driver):
                 print(f"  ⚠️  이전 버튼 클릭 실패")
                 return False
         else:
-            # 앞으로 가기
             if not click_next_button(driver):
                 print(f"  ⚠️  다음 버튼 클릭 실패")
                 return False
         
         moves += 1
     
-    print(f"  ⚠️  {target_draw}회로 이동 실패 (최대 시도 초과)")
+    print(f"  ⚠️  {target_draw}회로 이동 실패")
     return False
 
 def extract_current_draw_data(driver):
@@ -173,7 +184,6 @@ def extract_current_draw_data(driver):
     try:
         html = driver.page_source
         
-        # 회차 추출
         draw_match = re.search(r'제 <span class="color-g ltEpsd">(\d+)</span>회 추첨 결과', html)
         if not draw_match:
             draw_match = re.search(r'ltEpsd">(\d+)</span>회', html)
@@ -183,14 +193,12 @@ def extract_current_draw_data(driver):
         
         draw_no = int(draw_match.group(1))
         
-        # 추첨일 추출
         date_match = re.search(r'(\d{4})\.(\d{2})\.(\d{2})\s*추첨', html)
         if not date_match:
             return None
         
         date_str = f"{date_match.group(1)}{date_match.group(2)}{date_match.group(3)}"
         
-        # 당첨번호 추출
         ball_pattern = r'<div class="result-ball num-\dn">(\d+)</div>'
         balls = re.findall(ball_pattern, html)
         
@@ -199,7 +207,6 @@ def extract_current_draw_data(driver):
         
         numbers = [int(b) for b in balls[:7]]
         
-        # JSON 객체 생성
         new_entry = {
             "winType0": 0,
             "winType1": 0,
@@ -238,7 +245,7 @@ def extract_current_draw_data(driver):
         
         return new_entry
         
-    except Exception as e:
+    except:
         return None
 
 def collect_missing_draws(driver, existing_data, start_draw):
@@ -248,7 +255,6 @@ def collect_missing_draws(driver, existing_data, start_draw):
     
     added_count = 0
     failed_count = 0
-    current_draw = start_draw
     
     existing_draws = [item['ltEpsd'] for item in existing_data['data']['list']]
     
@@ -258,16 +264,31 @@ def collect_missing_draws(driver, existing_data, start_draw):
         return existing_data, 0
     
     # 2. 앞으로 진행하면서 수집
-    while failed_count < MAX_FAILED_ATTEMPTS:
+    last_draw = None
+    stuck_count = 0
+    
+    while failed_count < MAX_FAILED_ATTEMPTS and stuck_count < 5:
         current = get_current_displayed_draw(driver)
         
         if not current:
             print(f"  ⚠️  회차 확인 실패")
             failed_count += 1
             
-            if not click_next_button(driver):
+            # ⭐ 강제로 다음 버튼 클릭 시도
+            if not click_next_button(driver, force=True):
                 break
             continue
+        
+        # 같은 회차에 멈춰있는지 확인
+        if current == last_draw:
+            stuck_count += 1
+            if stuck_count >= 3:
+                print(f"  ℹ️  {current}회에서 더 이상 진행 불가\n")
+                break
+        else:
+            stuck_count = 0
+        
+        last_draw = current
         
         print(f"[{current}회]")
         
@@ -275,9 +296,11 @@ def collect_missing_draws(driver, existing_data, start_draw):
         if current in existing_draws:
             print(f"  ℹ️  이미 존재함, 건너뛰기\n")
             
-            if not click_next_button(driver):
-                print(f"  ℹ️  다음 버튼 없음 (최신 도달)\n")
-                break
+            if not click_next_button(driver, force=False):
+                # ⭐ 일반 클릭 실패 시 강제 클릭 시도
+                if not click_next_button(driver, force=True):
+                    print(f"  ℹ️  더 이상 진행 불가\n")
+                    break
             
             failed_count = 0
             continue
@@ -312,53 +335,49 @@ def collect_missing_draws(driver, existing_data, start_draw):
                 break
         
         # 다음으로
-        if not click_next_button(driver):
-            print(f"  ℹ️  다음 버튼 없음 (최신 도달)\n")
-            break
+        if not click_next_button(driver, force=False):
+            # ⭐ 일반 클릭 실패 시 강제 클릭 시도
+            print(f"  ℹ️  일반 버튼 비활성화, 강제 클릭 시도...")
+            if not click_next_button(driver, force=True):
+                print(f"  ℹ️  더 이상 진행 불가\n")
+                break
     
     return existing_data, added_count
 
 def main():
     print("="*60)
-    print("🎯 스마트 점진적 업데이트 (최종 안정 버전)")
+    print("🎯 스마트 점진적 업데이트 (완성 버전)")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60 + "\n")
     
     driver = None
     
     try:
-        # 1. 기존 JSON 로드
         existing_data, existing_latest = load_existing_json()
         
         if existing_data is None:
             return 1
         
-        # 2. WebDriver 초기화
         driver = setup_driver()
         
-        # 3. 페이지 접속
         print(f"📡 페이지 접속: {RESULT_URL}")
         driver.get(RESULT_URL)
         time.sleep(3)
         print(f"   페이지 로드 완료\n")
         
-        # 4. 현재 위치 확인
         initial_draw = get_current_displayed_draw(driver)
         print(f"📍 현재 위치: {initial_draw}회")
         print(f"   JSON 최신: {existing_latest}회")
         print(f"   목표: {existing_latest + 1}회부터 수집\n")
         
-        # 5. 누락 회차 수집
         start_draw = existing_latest + 1
         updated_data, added_count = collect_missing_draws(driver, existing_data, start_draw)
         
-        # 6. 결과 확인
         if added_count == 0:
             print("✅ 이미 최신 상태입니다")
             print("   변경사항 없음\n")
             return 0
         
-        # 7. 저장
         with open(JSON_FILE, 'w', encoding='utf-8') as f:
             json.dump(updated_data, f, ensure_ascii=False, indent=4)
         

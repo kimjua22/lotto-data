@@ -22,16 +22,20 @@ jobs:
       with:
         python-version: '3.11'
     
-    - name: 🌐 Setup Chrome
-      uses: browser-actions/setup-chrome@latest
-      with:
-        chrome-version: stable
+    - name: 🌐 Setup Chrome and ChromeDriver
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y chromium-browser chromium-chromedriver
+        chromium-browser --version
+        chromedriver --version
     
     - name: 📦 Install Selenium
       run: pip install selenium
     
     - name: 🎰 Run Selenium Crawler
-      run: python update_lotto_selenium.py
+      run: |
+        export PATH=$PATH:/usr/lib/chromium-browser/
+        python update_lotto_selenium.py
     
     - name: 📊 Check Result
       run: |

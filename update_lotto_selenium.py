@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # update_lotto_selenium.py
 """
-스마트 점진적 업데이트 - 회차별 페이지 재로드
-각 회차마다 페이지를 새로 로드하여 정확한 데이터 추출
+성공한 방식을 유지하면서 여러 회차 자동 업데이트
+드롭다운 클릭으로 회차 변경 → 데이터 추출 → 반복
 """
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 import json
@@ -18,8 +20,8 @@ from datetime import datetime
 # 설정
 JSON_FILE = 'lotto_json.json'
 RESULT_URL = 'https://www.dhlottery.co.kr/lt645/result'
-MAX_FAILED_ATTEMPTS = 3  # 연속 실패 3회 시 중단
-MAX_TOTAL_ATTEMPTS = 10  # 총 시도 10회 제한
+MAX_FAILED_ATTEMPTS = 3
+MAX_TOTAL_ATTEMPTS = 10
 
 def setup_driver():
     """WebDriver 설정"""
@@ -66,50 +68,65 @@ def load_existing_json():
         print(f"❌ JSON 로드 실패: {e}\n")
         return None, 0
 
-def load_draw_page(driver, draw_no):
-    """특정 회차 페이지 로드"""
-    
-    # ⭐ 회차별 URL로 페이지 재로드
-    # 동행복권은 URL 파라미터로 회차 지정 가능
-    url_with_draw = f"{RESULT_URL}?drwNo={draw_no}"
-    
-    print(f"  📡 페이지 로드: {draw_no}회")
+def click_dropdown_for_draw(driver, draw_no):
+    """드롭다운 클릭해서 특정 회차 선택"""
     
     try:
-        driver.get(url_with_draw)
-        time.sleep(3)  # 페이지 로딩 대기
+        # JavaScript로 드롭다운 값 변경
+        script = f"""
+        var input = document.getElementById('opt_val');
+        if (input) {{
+            input.value = '{draw_no}';
+            
+            // 트리거 버튼 텍스트 변경
+            var trigger = document.getElementById('d-trigger_txt');
+            if (trigger) {{
+                trigger.textContent = '{draw_no}회';
+            }}
+            
+            // change 이벤트 발생
+            var event = new Event('change', {{ bubbles: true }});
+            input.dispatchEvent(event);
+            
+            // 버튼 클릭 시뮬레이션
+            var buttons = document.querySelectorAll('.option-il');
+            for (var i = 0; i < buttons.length; i++) {{
+                if (buttons[i].getAttribute('data-value') == '{draw_no}') {{
+                    buttons[i].click();
+                    break;
+                }}
+            }}
+        }}
+        """
+        
+        driver.execute_script(script)
+        time.sleep(2)  # 페이지 업데이트 대기
+        
         return True
+        
     except Exception as e:
-        print(f"  ❌ 페이지 로드 실패: {e}")
+        print(f"  ⚠️  드롭다운 클릭 실패: {e}")
         return False
 
-def extract_draw_data_from_page(driver, target_draw_no):
-    """현재 페이지에서 회차 데이터 추출"""
+def extract_current_draw_data(driver):
+    """현재 표시된 회차 데이터 추출"""
     
     try:
         html = driver.page_source
         
-        # 회차 확인
+        # 회차 추출
         draw_match = re.search(r'제 <span class="color-g ltEpsd">(\d+)</span>회 추첨 결과', html)
         if not draw_match:
             draw_match = re.search(r'ltEpsd">(\d+)</span>회', html)
         
         if not draw_match:
-            print(f"  ❌ 회차 번호를 찾을 수 없음")
             return None
         
-        current_draw = int(draw_match.group(1))
-        
-        # 회차 검증
-        if current_draw != target_draw_no:
-            print(f"  ⚠️  회차 불일치: 목표 {target_draw_no}회, 실제 {current_draw}회")
-            # 그래도 현재 표시된 회차 데이터 추출 시도
-            target_draw_no = current_draw
+        draw_no = int(draw_match.group(1))
         
         # 추첨일 추출
         date_match = re.search(r'(\d{4})\.(\d{2})\.(\d{2})\s*추첨', html)
         if not date_match:
-            print(f"  ❌ 추첨일 없음 (아직 추첨 안 됨)")
             return None
         
         date_str = f"{date_match.group(1)}{date_match.group(2)}{date_match.group(3)}"
@@ -119,7 +136,6 @@ def extract_draw_data_from_page(driver, target_draw_no):
         balls = re.findall(ball_pattern, html)
         
         if len(balls) < 7:
-            print(f"  ❌ 당첨번호 부족: {len(balls)}개")
             return None
         
         numbers = [int(b) for b in balls[:7]]
@@ -131,7 +147,7 @@ def extract_draw_data_from_page(driver, target_draw_no):
             "winType2": 0,
             "winType3": 0,
             "gmSqNo": 5133,
-            "ltEpsd": current_draw,
+            "ltEpsd": draw_no,
             "tm1WnNo": numbers[0],
             "tm2WnNo": numbers[1],
             "tm3WnNo": numbers[2],
@@ -168,7 +184,7 @@ def extract_draw_data_from_page(driver, target_draw_no):
         return None
 
 def try_update_multiple_draws(driver, existing_data, start_draw):
-    """여러 회차 순차적으로 시도 - 각 회차마다 페이지 재로드"""
+    """여러 회차 순차 업데이트"""
     
     print(f"🔄 연속 업데이트 시작: {start_draw}회부터\n")
     
@@ -189,26 +205,34 @@ def try_update_multiple_draws(driver, existing_data, start_draw):
             failed_count = 0
             continue
         
-        # ⭐ 매번 새로운 페이지 로드
-        if not load_draw_page(driver, current_draw):
-            print(f"  ⚠️  페이지 로드 실패\n")
+        # ⭐ 드롭다운 클릭해서 회차 변경
+        print(f"  🖱️  드롭다운에서 {current_draw}회 선택...")
+        if not click_dropdown_for_draw(driver, current_draw):
+            print(f"  ⚠️  회차 선택 실패\n")
             failed_count += 1
             current_draw += 1
             continue
         
         # 데이터 추출
-        new_entry = extract_draw_data_from_page(driver, current_draw)
+        new_entry = extract_current_draw_data(driver)
         
         if new_entry:
-            # 성공!
             actual_draw = new_entry['ltEpsd']
             
-            # 중복 확인
-            if actual_draw in existing_draws:
-                print(f"  ⚠️  {actual_draw}회는 이미 존재함\n")
-                failed_count += 1
-                current_draw += 1
-                continue
+            # 회차 검증
+            if actual_draw != current_draw:
+                print(f"  ⚠️  회차 불일치: 목표 {current_draw}회, 실제 {actual_draw}회")
+                
+                # 실제 표시된 회차가 이미 존재하는지 확인
+                if actual_draw in existing_draws:
+                    print(f"  ⚠️  {actual_draw}회는 이미 존재함, 건너뛰기\n")
+                    failed_count += 1
+                    current_draw += 1
+                    continue
+                
+                # 실제 회차로 추가
+                print(f"  → {actual_draw}회 데이터로 추가")
+                current_draw = actual_draw
             
             print(f"  ✅ {actual_draw}회 추출 성공")
             print(f"     당첨번호: {new_entry['tm1WnNo']}, {new_entry['tm2WnNo']}, {new_entry['tm3WnNo']}, {new_entry['tm4WnNo']}, {new_entry['tm5WnNo']}, {new_entry['tm6WnNo']} + {new_entry['bnsWnNo']}")
@@ -219,10 +243,9 @@ def try_update_multiple_draws(driver, existing_data, start_draw):
             existing_data['data']['list'].sort(key=lambda x: x['ltEpsd'])
             
             added_count += 1
-            failed_count = 0  # 성공 시 실패 카운트 리셋
+            failed_count = 0
             
         else:
-            # 실패
             print(f"  ⚠️  {current_draw}회 추출 실패 (아직 추첨 안 됨)\n")
             failed_count += 1
             
@@ -239,7 +262,7 @@ def try_update_multiple_draws(driver, existing_data, start_draw):
 
 def main():
     print("="*60)
-    print("🎯 스마트 점진적 업데이트 (회차별 페이지 로드)")
+    print("🎯 스마트 점진적 업데이트 (드롭다운 방식)")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60 + "\n")
     
@@ -255,22 +278,28 @@ def main():
         # 2. WebDriver 초기화
         driver = setup_driver()
         
-        # 3. 다음 회차부터 시도
+        # 3. 페이지 접속
+        print(f"📡 페이지 접속: {RESULT_URL}")
+        driver.get(RESULT_URL)
+        time.sleep(3)
+        print(f"   페이지 로드 완료\n")
+        
+        # 4. 다음 회차부터 시도
         start_draw = existing_latest + 1
         
         print(f"🎯 업데이트 대상: {start_draw}회부터")
         print(f"   최대 {MAX_TOTAL_ATTEMPTS}회 시도, {MAX_FAILED_ATTEMPTS}회 연속 실패 시 중단\n")
         
-        # 4. 여러 회차 순차 업데이트
+        # 5. 여러 회차 순차 업데이트
         updated_data, added_count = try_update_multiple_draws(driver, existing_data, start_draw)
         
-        # 5. 결과 확인
+        # 6. 결과 확인
         if added_count == 0:
             print("✅ 이미 최신 상태입니다")
             print("   변경사항 없음\n")
             return 0
         
-        # 6. 저장
+        # 7. 저장
         with open(JSON_FILE, 'w', encoding='utf-8') as f:
             json.dump(updated_data, f, ensure_ascii=False, indent=4)
         

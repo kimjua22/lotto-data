@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # update_lotto_selenium.py
 """
-스마트 점진적 업데이트
-- 기존 JSON의 최신 회차 확인
-- 다음 회차부터 순차적으로 시도
-- 추첨 안 된 회차 만나면 중단
+스마트 점진적 업데이트 - 무한 루프 방지
+- 회차 불일치 시 실패 처리
+- 중복 데이터 검증
+- 최대 시도 횟수 제한
 """
 
 from selenium import webdriver
@@ -20,7 +20,8 @@ from datetime import datetime
 # 설정
 JSON_FILE = 'lotto_json.json'
 RESULT_URL = 'https://www.dhlottery.co.kr/lt645/result'
-MAX_ATTEMPTS = 5  # 최대 시도 회차 (미추첨 5회 연속 시 중단)
+MAX_FAILED_ATTEMPTS = 3  # 연속 실패 3회 시 중단
+MAX_TOTAL_ATTEMPTS = 10  # 총 시도 10회 제한
 
 def setup_driver():
     """WebDriver 설정"""
@@ -67,49 +68,28 @@ def load_existing_json():
         print(f"❌ JSON 로드 실패: {e}\n")
         return None, 0
 
-def select_draw_number(driver, draw_no):
-    """드롭다운에서 특정 회차 선택"""
-    try:
-        # JavaScript로 직접 변경
-        script = f"""
-        var select = document.getElementById('opt_val');
-        if (select) {{
-            select.value = '{draw_no}';
-            // 변경 이벤트 트리거
-            var event = new Event('change');
-            select.dispatchEvent(event);
-        }}
-        """
-        driver.execute_script(script)
-        
-        # 페이지 로딩 대기
-        time.sleep(2)
-        
-        return True
-    except Exception as e:
-        print(f"  회차 선택 실패: {e}")
-        return False
-
 def extract_draw_data(driver, target_draw_no):
     """현재 페이지에서 특정 회차 데이터 추출"""
     
     try:
         html = driver.page_source
         
-        # 회차 확인
+        # ⭐ 회차 확인 (엄격)
         draw_match = re.search(r'제 <span class="color-g ltEpsd">(\d+)</span>회 추첨 결과', html)
         if not draw_match:
             draw_match = re.search(r'ltEpsd">(\d+)</span>회', html)
         
         if not draw_match:
+            print(f"  ❌ 회차 번호를 찾을 수 없음")
             return None
         
         current_draw = int(draw_match.group(1))
         
-        # 목표 회차와 일치하는지 확인
+        # ⭐ 회차 불일치 시 실패 처리 (중요!)
         if current_draw != target_draw_no:
-            print(f"  ⚠️  회차 불일치: 목표 {target_draw_no}회, 실제 {current_draw}회")
-            # 그래도 계속 진행 (HTML 구조 문제일 수 있음)
+            print(f"  ❌ 회차 불일치: 목표 {target_draw_no}회, 실제 {current_draw}회")
+            print(f"     → 회차 선택 실패, 이 회차는 건너뜀")
+            return None
         
         # 추첨일 추출
         date_match = re.search(r'(\d{4})\.(\d{2})\.(\d{2})\s*추첨', html)
@@ -136,7 +116,7 @@ def extract_draw_data(driver, target_draw_no):
             "winType2": 0,
             "winType3": 0,
             "gmSqNo": 5133,
-            "ltEpsd": target_draw_no,
+            "ltEpsd": current_draw,  # ⭐ 실제 회차 사용
             "tm1WnNo": numbers[0],
             "tm2WnNo": numbers[1],
             "tm3WnNo": numbers[2],
@@ -172,6 +152,23 @@ def extract_draw_data(driver, target_draw_no):
         print(f"  ❌ 추출 실패: {e}")
         return None
 
+def is_duplicate_data(existing_data, new_entry):
+    """중복 데이터 검증 (회차 + 날짜)"""
+    
+    for item in existing_data['data']['list']:
+        if item['ltEpsd'] == new_entry['ltEpsd']:
+            # 같은 회차가 이미 존재
+            if item['ltRflYmd'] == new_entry['ltRflYmd']:
+                # 날짜도 같음 → 완전 중복
+                return True
+            else:
+                # 날짜가 다름 → 데이터 이상
+                print(f"  ⚠️  경고: {new_entry['ltEpsd']}회 데이터 불일치")
+                print(f"     기존: {item['ltRflYmd']}, 새: {new_entry['ltRflYmd']}")
+                return True
+    
+    return False
+
 def try_update_multiple_draws(driver, existing_data, start_draw):
     """여러 회차 순차적으로 시도"""
     
@@ -179,25 +176,32 @@ def try_update_multiple_draws(driver, existing_data, start_draw):
     
     added_count = 0
     failed_count = 0
+    total_attempts = 0
     current_draw = start_draw
     
-    while failed_count < MAX_ATTEMPTS:
-        print(f"[{current_draw}회 시도]")
+    while failed_count < MAX_FAILED_ATTEMPTS and total_attempts < MAX_TOTAL_ATTEMPTS:
+        print(f"[{current_draw}회 시도] (시도 {total_attempts + 1}/{MAX_TOTAL_ATTEMPTS})")
+        total_attempts += 1
         
-        # 이미 존재하는지 확인
+        # ⭐ 이미 존재하는지 확인
         existing_draws = [item['ltEpsd'] for item in existing_data['data']['list']]
         if current_draw in existing_draws:
             print(f"  ℹ️  이미 존재함, 건너뛰기\n")
             current_draw += 1
+            failed_count = 0  # 존재하는 건 실패가 아님
             continue
         
-        # 회차 선택 시도
-        select_draw_number(driver, current_draw)
-        
-        # 데이터 추출
+        # 데이터 추출 (회차 선택은 내부에서 자동)
         new_entry = extract_draw_data(driver, current_draw)
         
         if new_entry:
+            # ⭐ 중복 검증
+            if is_duplicate_data(existing_data, new_entry):
+                print(f"  ⚠️  중복 데이터 감지, 건너뛰기\n")
+                failed_count += 1
+                current_draw += 1
+                continue
+            
             # 성공!
             print(f"  ✅ {current_draw}회 추출 성공")
             print(f"     당첨번호: {new_entry['tm1WnNo']}, {new_entry['tm2WnNo']}, {new_entry['tm3WnNo']}, {new_entry['tm4WnNo']}, {new_entry['tm5WnNo']}, {new_entry['tm6WnNo']} + {new_entry['bnsWnNo']}")
@@ -211,22 +215,25 @@ def try_update_multiple_draws(driver, existing_data, start_draw):
             failed_count = 0  # 성공 시 실패 카운트 리셋
             
         else:
-            # 실패 (아직 추첨 안 됨)
-            print(f"  ⚠️  {current_draw}회 추출 실패 (아직 추첨 안 됨)\n")
+            # 실패
+            print(f"  ⚠️  {current_draw}회 추출 실패\n")
             failed_count += 1
             
-            if failed_count >= MAX_ATTEMPTS:
-                print(f"  ℹ️  {MAX_ATTEMPTS}회 연속 실패, 중단\n")
+            if failed_count >= MAX_FAILED_ATTEMPTS:
+                print(f"  ℹ️  {MAX_FAILED_ATTEMPTS}회 연속 실패, 중단\n")
                 break
         
         current_draw += 1
         time.sleep(1)  # 서버 부하 방지
     
+    if total_attempts >= MAX_TOTAL_ATTEMPTS:
+        print(f"  ℹ️  최대 시도 횟수({MAX_TOTAL_ATTEMPTS}회) 도달, 중단\n")
+    
     return existing_data, added_count
 
 def main():
     print("="*60)
-    print("🎯 스마트 점진적 업데이트")
+    print("🎯 스마트 점진적 업데이트 (무한 루프 방지)")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60 + "\n")
     
@@ -251,7 +258,8 @@ def main():
         # 4. 다음 회차부터 시도
         start_draw = existing_latest + 1
         
-        print(f"🎯 업데이트 대상: {start_draw}회부터\n")
+        print(f"🎯 업데이트 대상: {start_draw}회부터")
+        print(f"   최대 {MAX_TOTAL_ATTEMPTS}회 시도, {MAX_FAILED_ATTEMPTS}회 연속 실패 시 중단\n")
         
         # 5. 여러 회차 순차 업데이트
         updated_data, added_count = try_update_multiple_draws(driver, existing_data, start_draw)
@@ -289,9 +297,6 @@ def main():
         if driver:
             driver.quit()
             print("\n🌐 WebDriver 종료")
-
-if __name__ == '__main__':
-    sys.exit(main())
 
 if __name__ == '__main__':
     sys.exit(main())

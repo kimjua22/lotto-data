@@ -87,7 +87,7 @@ def load_specific_draw_page(driver, draw_no):
     """특정 회차 페이지 로드 (URL 파라미터 사용)"""
     
     # ⭐ URL에 회차 번호 직접 지정!
-    url = f"{RESULT_URL}?ltEpsd={draw_no}"
+    url = f"{RESULT_URL}?drwNo={draw_no}"
     
     print(f"  📡 {draw_no}회 페이지 로드: {url}")
     

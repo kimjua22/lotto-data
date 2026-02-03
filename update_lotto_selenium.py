@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # update_lotto_selenium.py
 """
-최종 완성 버전 - 활성 슬라이드 정확 추출
+최종 해결책 - URL 파라미터로 각 회차 직접 접근
 """
 
 from selenium import webdriver
@@ -65,37 +65,6 @@ def load_existing_json():
         print(f"❌ JSON 로드 실패: {e}\n")
         return None, 0
 
-def wait_for_page_fully_loaded(driver):
-    """페이지와 슬라이더가 완전히 로드될 때까지 대기"""
-    
-    print("⏳ 페이지 완전 로딩 대기...")
-    
-    try:
-        wait = WebDriverWait(driver, 15)
-        wait.until(EC.presence_of_element_located((By.CLASS_NAME, "swiper-slide")))
-        
-        time.sleep(3)
-        
-        for attempt in range(5):
-            html = driver.page_source
-            
-            pattern = r'data-value="(\d+)">(\d+)회</button>'
-            matches = re.findall(pattern, html)
-            
-            if len(matches) >= 10:
-                print(f"✅ 페이지 로딩 완료 (드롭다운 옵션: {len(matches)}개)\n")
-                return True
-            
-            print(f"  대기 중... (옵션: {len(matches)}개)")
-            time.sleep(2)
-        
-        print("⚠️  페이지 로딩 확인 실패, 계속 진행\n")
-        return True
-        
-    except Exception as e:
-        print(f"⚠️  대기 중 오류: {e}\n")
-        return True
-
 def get_latest_draw_from_dropdown(driver):
     """드롭다운에서 최신 회차 확인"""
     try:
@@ -114,91 +83,57 @@ def get_latest_draw_from_dropdown(driver):
     except:
         return None
 
-def get_active_slide_draw(driver):
-    """활성 슬라이드에서 회차 번호 확인"""
+def load_specific_draw_page(driver, draw_no):
+    """특정 회차 페이지 로드 (URL 파라미터 사용)"""
+    
+    # ⭐ URL에 회차 번호 직접 지정!
+    url = f"{RESULT_URL}?ltEpsd={draw_no}"
+    
+    print(f"  📡 {draw_no}회 페이지 로드: {url}")
+    
     try:
-        html = driver.page_source
-        
-        # ⭐ swiper-slide-active 클래스를 가진 슬라이드만 찾기
-        active_pattern = r'swiper-slide-active[^>]*>.*?제 <span class="color-g ltEpsd">(\d+)</span>회'
-        match = re.search(active_pattern, html, re.DOTALL)
-        
-        if match:
-            return int(match.group(1))
-        
-        # 대안: swiper-slide-visible 클래스
-        visible_pattern = r'swiper-slide-visible[^>]*>.*?제 <span class="color-g ltEpsd">(\d+)</span>회'
-        match = re.search(visible_pattern, html, re.DOTALL)
-        
-        if match:
-            return int(match.group(1))
-        
-        return None
-    except:
-        return None
-
-def click_prev_button(driver):
-    """이전 버튼 클릭"""
-    try:
-        script = """
-        var prevBtn = document.querySelector('.swiper-button-prev');
-        if (prevBtn && !prevBtn.classList.contains('swiper-button-disabled')) {
-            prevBtn.click();
-            return true;
-        }
-        return false;
-        """
-        
-        result = driver.execute_script(script)
-        
-        if result:
-            time.sleep(2)
-            return True
-        
-        return False
-        
-    except:
+        driver.get(url)
+        time.sleep(3)  # 페이지 로딩 대기
+        return True
+    except Exception as e:
+        print(f"  ❌ 페이지 로드 실패: {e}")
         return False
 
-def extract_active_slide_data(driver):
-    """활성 슬라이드에서 데이터 추출"""
+def extract_draw_data_from_page(driver, target_draw_no):
+    """페이지에서 회차 데이터 추출"""
     
     try:
         html = driver.page_source
         
-        # ⭐ 활성 슬라이드만 찾기
-        active_slide_pattern = r'swiper-slide-active[^>]*>(.*?)</div>\s*<div class="swiper-slide'
-        active_match = re.search(active_slide_pattern, html, re.DOTALL)
+        # 회차 확인
+        draw_match = re.search(r'제 <span class="color-g ltEpsd">(\d+)</span>회 추첨 결과', html)
+        if not draw_match:
+            draw_match = re.search(r'ltEpsd">(\d+)</span>회', html)
         
-        if not active_match:
-            # 대안: visible 슬라이드
-            active_slide_pattern = r'swiper-slide-visible[^>]*>(.*?)</div>\s*<div class="swiper-slide'
-            active_match = re.search(active_slide_pattern, html, re.DOTALL)
-        
-        if not active_match:
-            return None
-        
-        slide_html = active_match.group(1)
-        
-        # 회차 추출
-        draw_match = re.search(r'제 <span class="color-g ltEpsd">(\d+)</span>회', slide_html)
         if not draw_match:
             return None
         
         draw_no = int(draw_match.group(1))
         
+        # 회차 검증
+        if draw_no != target_draw_no:
+            print(f"  ⚠️  회차 불일치: 목표 {target_draw_no}회, 실제 {draw_no}회")
+            return None
+        
         # 추첨일 추출
-        date_match = re.search(r'(\d{4})\.(\d{2})\.(\d{2})\s*추첨', slide_html)
+        date_match = re.search(r'(\d{4})\.(\d{2})\.(\d{2})\s*추첨', html)
         if not date_match:
+            print(f"  ⚠️  추첨일 없음 (아직 추첨 안 됨)")
             return None
         
         date_str = f"{date_match.group(1)}{date_match.group(2)}{date_match.group(3)}"
         
         # 당첨번호 추출
         ball_pattern = r'<div class="result-ball num-\dn">(\d+)</div>'
-        balls = re.findall(ball_pattern, slide_html)
+        balls = re.findall(ball_pattern, html)
         
         if len(balls) < 7:
+            print(f"  ⚠️  당첨번호 부족: {len(balls)}개")
             return None
         
         numbers = [int(b) for b in balls[:7]]
@@ -241,66 +176,45 @@ def extract_active_slide_data(driver):
         
         return new_entry
         
-    except:
+    except Exception as e:
+        print(f"  ❌ 추출 실패: {e}")
         return None
 
-def collect_missing_draws_from_current(driver, existing_data, page_latest, json_latest):
-    """현재 위치에서부터 역순으로 필요한 회차만 수집"""
+def collect_missing_draws_by_url(driver, existing_data, page_latest, json_latest):
+    """URL로 각 회차 직접 접근하여 수집"""
     
-    print(f"🔄 역순 수집: 현재 위치부터 {json_latest + 1}회까지\n")
+    print(f"🔄 URL 직접 접근: {page_latest}회부터 {json_latest + 1}회까지\n")
     
     added_list = []
     existing_draws = [item['ltEpsd'] for item in existing_data['data']['list']]
     
-    processed_draws = set()
-    
-    for attempt in range(20):
-        # ⭐ 활성 슬라이드에서 회차 확인
-        displayed = get_active_slide_draw(driver)
+    # 최신 회차부터 역순으로
+    for draw_no in range(page_latest, json_latest, -1):
+        print(f"[{draw_no}회]")
         
-        if not displayed:
-            print(f"  ⚠️  회차 확인 실패\n")
-            break
-        
-        if displayed in processed_draws:
-            print(f"  ℹ️  {displayed}회는 이미 처리함, 종료\n")
-            break
-        
-        processed_draws.add(displayed)
-        
-        print(f"[{displayed}회]")
-        
-        if displayed <= json_latest:
-            print(f"  ℹ️  {displayed}회는 JSON에 이미 있음, 종료\n")
-            break
-        
-        if displayed in existing_draws or displayed in [e['ltEpsd'] for e in added_list]:
-            print(f"  ℹ️  이미 처리됨, 다음으로\n")
-            
-            if not click_prev_button(driver):
-                print(f"  ℹ️  이전 버튼 없음\n")
-                break
-            
+        # 이미 존재?
+        if draw_no in existing_draws:
+            print(f"  ℹ️  이미 존재함, 건너뛰기\n")
             continue
         
-        # ⭐ 활성 슬라이드에서 데이터 추출
-        new_entry = extract_active_slide_data(driver)
+        # ⭐ URL로 직접 페이지 로드
+        if not load_specific_draw_page(driver, draw_no):
+            print(f"  ⚠️  페이지 로드 실패\n")
+            continue
+        
+        # 데이터 추출
+        new_entry = extract_draw_data_from_page(driver, draw_no)
         
         if new_entry:
-            actual_draw = new_entry['ltEpsd']
-            
-            print(f"  ✅ {actual_draw}회 추출 성공")
+            print(f"  ✅ {draw_no}회 추출 성공")
             print(f"     당첨번호: {new_entry['tm1WnNo']}, {new_entry['tm2WnNo']}, {new_entry['tm3WnNo']}, {new_entry['tm4WnNo']}, {new_entry['tm5WnNo']}, {new_entry['tm6WnNo']} + {new_entry['bnsWnNo']}")
             print(f"     추첨일: {new_entry['ltRflYmd']}\n")
             
             added_list.append(new_entry)
         else:
-            print(f"  ⚠️  데이터 추출 실패\n")
-        
-        if not click_prev_button(driver):
-            print(f"  ℹ️  이전 버튼 없음, 종료\n")
-            break
+            print(f"  ⚠️  {draw_no}회 데이터 없음 (아직 추첨 안 됨)\n")
     
+    # 추가
     if added_list:
         existing_data['data']['list'].extend(added_list)
         existing_data['data']['list'].sort(key=lambda x: x['ltEpsd'])
@@ -309,7 +223,7 @@ def collect_missing_draws_from_current(driver, existing_data, page_latest, json_
 
 def main():
     print("="*60)
-    print("🎯 스마트 점진적 업데이트 (활성 슬라이드)")
+    print("🎯 스마트 점진적 업데이트 (URL 직접 접근)")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60 + "\n")
     
@@ -323,28 +237,30 @@ def main():
         
         driver = setup_driver()
         
-        print(f"📡 페이지 접속: {RESULT_URL}")
+        # 초기 페이지 접속 (드롭다운 확인용)
+        print(f"📡 초기 페이지 접속: {RESULT_URL}")
         driver.get(RESULT_URL)
+        time.sleep(5)
+        print(f"   페이지 로드 완료\n")
         
-        wait_for_page_fully_loaded(driver)
-        
+        # 드롭다운에서 최신 회차 확인
         page_latest = get_latest_draw_from_dropdown(driver)
         
         if not page_latest:
             print("❌ 최신 회차를 확인할 수 없습니다\n")
             return 1
         
-        initial_displayed = get_active_slide_draw(driver)
-        
-        print(f"📍 드롭다운 최신: {page_latest}회")
-        print(f"   활성 슬라이드: {initial_displayed}회  ⭐")
-        print(f"   JSON 최신: {json_latest}회\n")
+        print(f"📍 페이지 최신: {page_latest}회")
+        print(f"   JSON 최신: {json_latest}회")
         
         if page_latest <= json_latest:
-            print(f"✅ 이미 최신 상태입니다\n")
+            print(f"\n✅ 이미 최신 상태입니다\n")
             return 0
         
-        updated_data, added_count = collect_missing_draws_from_current(
+        print(f"   필요한 회차: {json_latest + 1}회 ~ {page_latest}회 (총 {page_latest - json_latest}개)\n")
+        
+        # ⭐ URL로 각 회차 직접 접근
+        updated_data, added_count = collect_missing_draws_by_url(
             driver, existing_data, page_latest, json_latest
         )
         
@@ -352,6 +268,7 @@ def main():
             print("✅ 변경사항 없음\n")
             return 0
         
+        # 저장
         with open(JSON_FILE, 'w', encoding='utf-8') as f:
             json.dump(updated_data, f, ensure_ascii=False, indent=4)
         

@@ -3,8 +3,8 @@ name: Update Lotto Data (JSON API)
 
 on:
   schedule:
-    # 매주 토요일 20:50 (KST) = UTC 11:50
-    - cron: '50 11 * * 6'
+    # 매주 토요일 20:55 (KST) = UTC 11:55
+    - cron: '55 11 * * 6'
   
   # 수동 실행
   workflow_dispatch:
